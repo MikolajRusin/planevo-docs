@@ -50,4 +50,4 @@ flowchart LR
     BE -->|present| UI
 ```
 
-dopisac 
+dopisac dalsze rozwijanie aplikacji
