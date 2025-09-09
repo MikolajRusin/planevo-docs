@@ -1,5 +1,6 @@
 # Planevo (Planning Evolution)
-Serwis webowy przeznaczony do zarządzania i kontrolowania osobistych wydatków.
+Serwis webowy przeznaczony do zarządzania i kontrolowania osobistych wydatków.  
+**Link do strony:** [https://www.planevo.pl/](https://www.planevo.pl/)
 
 ## 📖 Opis projektu
 Planevo to system do nowoczesnego zarządzania i kontrolowania finansów osobistych, który opiera się na przetwarzaniu obrazów paragonów i ekstrakcji kluczowych danych (data, sklep, pozycje z cenami, suma). Projekt powstał z myślą o przyspieszeniu i automatyzacji tego procesu, zachęcając użytkowników do regularnej kontroli wydatków. 💸
@@ -32,7 +33,31 @@ Planevo to system do nowoczesnego zarządzania i kontrolowania finansów osobist
 - **Własne kategorie** — tworzenie i edycja dopasowanych tagów wydatków
 
 ## 🏗️ Architektura Systemu Planevo
-!!!!!!!!!!!!!!!! Architektura Systemu Planevo zostala podzielona na 4 glowne mikrosserwisy.....!!!!!!!!!!!!!!!!!
+Architektura Systemu Planevo zostala podzielona na 5 głównych mikroserwisów, które są zarządzane przez Kubernetesa.
+
+### ☸️ Infrastruktura klastra
+
+Poniżej schemat infrastruktury z trzema maszynami wirtualnymi.
+```bash
+          ┌──────────────────────┐
+          │  Master Node (VM1)   │
+          │Control Plane + NGINX │
+          └───────────┬──────────┘
+                      │ Flannel CNI
+        ┌─────────────┴─────────────┐
+        │                           │
+┌──────────────────┐       ┌──────────────────┐
+│ Worker Node (VM2)│       │ Worker Node (VM3)│
+│                  │       │                  │
+│                  │       │                  │
+└──────────────────┘       └──────────────────┘
+
+```
+**Master Node** – pełni rolę kontrolną w Kubernetesie (API Server, etcd, Scheduler, Controller Manager). Dodatkowo na tej samej maszynie działa NGINX, który jest wystawiony jako reverse proxy / ingress i obsługuje ruch z zewnątrz.
+
+**Worker Node 1 i 2** – na tych maszynach uruchamiane są pody z mikroserwisami aplikacji (Auth Service, Finance Service, Gateway Service, itd.).
+
+**Networking** – komunikacja między nodami zrealizowana przez Flannel (CNI)
   
 ### Frontend (Next.js)
 Aplikacja oparta o Next.js (App Router), podzielona na sekcje:
@@ -98,7 +123,7 @@ Główny serwis odpowiedzialny za zarządzanie finansami:
 - **Model** – encje + DTO
 - **Repository** – warstwa dostępu do DB
 - **Exception** – obsługa wyjątków
-- **ValidationServcie** – walidacja danych
+- **ValidationService** – walidacja danych
 - **MetricsService** – metryki serwisu
 
 #### Gateway Service (API Gateway)
@@ -192,7 +217,6 @@ API Gateway pełniący rolę punktu wejścia do systemu:
 │   │   └─ resources/
 │   │       └─ application.yml
 ```
-
 ### AI Service (Python/FastAPI) — Receipt Processing
 Serwis odpowiedzialny za cały pipeline CV/OCR, post-processing oraz zwrot ustrukturyzowanego JSON:
 - **Field detection** – deterministyczny algorytm wykrywania i przycinania obszaru paragonu
@@ -201,10 +225,6 @@ Serwis odpowiedzialny za cały pipeline CV/OCR, post-processing oraz zwrot ustru
 - **Parowanie pozycji** – deterministyczny alogrytm filtrowania oraz scalania produktów i cen
 - **Post-processing (LLM)** – korekty, walidacje i ujednolicenie formatu
 - **API** – końcówki do uruchomienia zadania, sprawdzania statusu i pobrania wyniku
-
-#### Endpointy
-- `POST /process-receipt` — przetworzenie paragonu w przypadku zalogowanego użytkownika
-- `POST /public-process-receipt` — testowe przetworzenie paragonu dla nowych użytkowników
 
 #### Struktura
 ```bash
@@ -230,7 +250,7 @@ Serwis odpowiedzialny za cały pipeline CV/OCR, post-processing oraz zwrot ustru
 │  │  │  ├─ google_service.py
 │  │  │  └─ mistral_service.py
 │  │  ├─ utils/
-│  │  │  ├─ google_service_utils.py
+│  │  │  ├─ google_ocr_box_processor.py
 │  │  │  ├─ image_processing.py
 │  │  └─ ocr_service.py
 │  ├─ post_processing_service/
@@ -242,17 +262,65 @@ Serwis odpowiedzialny za cały pipeline CV/OCR, post-processing oraz zwrot ustru
 ├─ main.py
 ```
 
+#### Endpointy
+- `POST("api/v1/auth/register")` — rejestracja użytkownika; zwraca tokeny (access/refresh)
+- `POST("api/v1/auth/login")` — logowanie; wydanie tokenów
+- `GET("api/v1/auth/refresh")` — odświeżenie access tokenu z refresh tokenu
+- `GET("api/v1/auth/me")` — status i profil zalogowanego użytkownika
+- `GET("api/v1/auth/logout")` — wylogowanie; unieważnienie sesji  
+  
+- `POST("api/v1/budgets")` — utworzenie budżetu
+- `PUT("api/v1/budgets/{id}")` — aktualizacja budżetu
+- `GET("api/v1/budgets/{id}")` — pobranie szczegółów budżetu
+- `GET("api/v1/budgets")` — lista budżetów użytkownika
+- `DELETE("api/v1/budgets/{id}")` — usunięcie budżetu
 
+- `POST("api/v1/expenses")` — utworzenie wydatku
+- `PUT("api/v1/expenses/{id}")` — aktualizacja wydatku
+- `GET("api/v1/expenses/{id}")` — pobranie szczegółów wydatku
+- `GET("api/v1/expenses")` — lista wydatków (filtry/paginacja)
+- `DELETE("api/v1/expenses/{id}")` — usunięcie wydatku
+
+- `GET("api/v1/dashboard/overview")` — dane do dashboardu (podsumowanie)
+- `GET("api/v1/dashboard/monthly-spending")` — wydatki miesięczne
+- `GET("api/v1/dashboard/spending-by-category")` — wydatki wg kategorii
+- `GET("api/v1/dashboard/budget-overview")` — status realizacji budżetów
+- `GET("api/v1/dashboard/recent-transactions")` — ostatnie transakcje
+- `GET("api/v1/dashboard/spending-heatmap")` — mapa cieplna wydatków
+- `GET("api/v1/dashboard/daily-spending")` — dzienne wydatki
+
+- `POST("api/v1/categories")` — tworzenie kategorii
+- `GET("api/v1/categories")` — lista kategorii
+- `DELETE("api/v1/categories/{id}")` — usunięcie kategorii
+
+- `POST("api/v1/process-receipt")` — przetworzenie paragonu w przypadku zalogowanego użytkownika
+- `POST("api/v1/public-process-receipt")` — testowe przetworzenie paragonu dla nowych użytkowników
 
 ```mermaid
 flowchart LR
-    UI[Frontend UI] -->|upload| BE[Backend]
-    BE -->|POST /inference| AI[AI Service]
-    AI -->|task_id| BE
-    BE -->|poll status & get result| AI
-    AI -->|JSON result| BE
-    BE -->|persist| DB[(DB)]
-    BE -->|present| UI
+    UI[Frontend] -->|HTTPS| Ingress[NGINX Ingress Controller]
+    Ingress --> Gateway[API Gateway]
+
+    Gateway -->|/api/v1/auth/*| Auth[Auth Service]
+    Auth -->|issue/verify tokens| DB[(MongoDB)]
+
+    Gateway -->|/api/v1/budgets| Finance[Finance Service]
+    Gateway -->|/api/v1/expenses| Finance
+    Gateway -->|/api/v1/categories| Finance
+    Gateway -->|/api/v1/dashboard/*| Finance
+    Finance -->|persist/read| DB
+
+    Gateway -->|POST /api/v1/process-receipt| AI[AI Service]
+    Gateway -->|POST /api/v1/public-process-receipt| AI
+    AI -->|status / result| Gateway
+    AI -->|persist/read| DB
+
+    Gateway -->|JSON| UI
 ```
 
-dopisac dalsze rozwijanie aplikacji
+## 🚀 Dalsze plany rozwoju
+- Poprawienie dokładności przetwarzania paragonów
+- Notyfikacje Email - powiadomienia o przekroczonych budżetach 
+- Generowanie i zapis raportów na koniec miesiąca
+- Obsługa e-paragonów i e-faktur 
+- Testy aplikacji wśród małej grupy użytkowników - identyfikacja problemów i dostosowanie funkcjonalności do realnych potrzeb
